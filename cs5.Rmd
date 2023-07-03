@@ -1,0 +1,240 @@
+---
+title: "Data Acquisition and Survey Methods"
+author: "Fani Sentinella-Jerbić"
+date: "2023-05-15"
+output:
+  pdf_document:
+    toc: yes
+    extra_dependencies: ["longtable", "float"]
+  html_document:
+    toc: yes
+    df_print: paged
+header-includes:
+ \usepackage{float}
+subtitle: Assignment 1
+---
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.pos = "H")
+```
+
+
+## Introduction
+
+I will be scraping data for Frankfurt as my name starts with F. 
+
+```{r setup, include=FALSE} 
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+
+```{r}
+library(kableExtra)
+library(dplyr)
+library(rvest)
+library(ggplot2)
+```
+
+
+
+
+## Forecast for the next 48 hours
+
+Reference image:
+
+
+![Forecast For the Next 48 Hours](weekly.PNG){width=70%}
+
+I retrieved the whole table element from the HTML using xpath and its element id. Afterwards I used the built-in function to populate a table with the scraped data. I had to additionally remove the empty Forecast row which is filled with icons in the original, and the last row which was just the footer of the table. The result is printed below.
+
+```{r}
+document <- read_html("https://www.timeanddate.com/weather/germany/frankfurt")
+```
+
+```{r}
+table <- document %>% 
+  html_elements(xpath='//*[@id="wt-48"]') %>%
+  html_table(fill = TRUE)
+
+table <- table[[1]] %>% as.data.frame() 
+table[1,1] = 'Time of Day'
+table[4,1] = 'Description'
+names(table)[1] = 'Aspect'
+
+# remove empty Forecast row and footer
+table <- table[-c(2,13), ] 
+rownames(table) <- NULL
+
+table %>% kable(format="latex", booktabs = TRUE) %>% 
+  kable_styling(latex_options = c("striped", "scale_down", "HOLD_position"))
+```
+
+
+\newpage
+
+
+## Detailed Hourly Forecast For the Next 24 Hours
+
+Reference image:
+
+
+![Hourly Forecast For the Next 24 Hours](hourly.PNG){width=70%}
+
+
+Once again, I retrieved the whole table element from the HTML using xpath and its element id. Afterwards I used the the built-in function again to populate a table with the scraped data. I also removed the footer and icon row again. The result is printed below.
+
+
+```{r}
+document_hourly <- read_html("https://www.timeanddate.com/weather/germany/frankfurt/hourly")
+```
+
+
+```{r}
+table <- document_hourly %>% 
+  html_elements(xpath='//*[@id="wt-hbh"]') %>%
+  html_table(fill = TRUE)
+
+table <- table[[1]] %>% as.data.frame()
+table <- table[-c(26),-c(2)]
+rownames(table) <- NULL
+
+table %>% kable(format="latex", booktabs = TRUE) %>% 
+  kable_styling(latex_options = c("striped", "scale_down", "HOLD_position"))
+```
+
+### Visualization
+
+For the plots I used a simple line plot from ggplot.
+
+```{r}
+times <- table[[1]][-1]
+temperature <- table$Conditions[-1] 
+wind <- table$Comfort.1[-1]
+humidity <- table$Comfort.3[-1]
+
+times <- unlist(lapply(times, FUN = substr, start=1, stop=5))
+temperature <- substr(temperature, 1, nchar(temperature)-3) %>% as.integer()
+wind <- substr(wind, 1, nchar(wind)-5) %>% as.integer()
+humidity <- substr(humidity, 1, nchar(humidity)-1) %>% as.integer()
+```
+
+```{r}
+vis <- data.frame(times, temperature, wind, humidity)
+
+vis %>% kable(format="latex", booktabs = TRUE) %>% 
+  kable_styling(latex_options = c("striped", "HOLD_position"))
+```
+
+
+```{r, out.width="60%", fig.align = 'center'}
+vis %>% ggplot(aes(y=temperature, x=1:nrow(vis))) + 
+  geom_line(color="red", linetype="dotted") +
+  geom_point() +
+  xlab("Time") + ylab("Temperature [Celsius]")
+vis %>% ggplot(aes(y=wind, x=1:nrow(vis))) + 
+  geom_line(linetype="dotted") +
+  geom_point() +
+  xlab("Time") + ylab("Wind [km/h]")
+vis %>% ggplot(aes(y=humidity, x=1:nrow(vis))) + 
+  geom_line(color="blue", linetype="dotted")+
+  geom_point() +
+  xlab("Time") + ylab("Humidity [%]")
+```
+
+\newpage
+
+## Annual Weather Climate Averages
+
+Reference image:
+
+![Annual Weather Climate Averages](annual.PNG){width=60%}
+
+This one was somewhat more complicated. I checked the HTML structure to find this:
+
+```{r, eval = FALSE}
+January
+//*[@id="climateTable"]/div[2]/div[1]/p[1]/text()
+//*[@id="climateTable"]/div[2]/div[1]/p[2]/text()
+//*[@id="climateTable"]/div[2]/div[1]/p[3]/text()
+
+February
+//*[@id="climateTable"]/div[3]/div[1]/p[1]/text()
+//*[@id="climateTable"]/div[3]/div[1]/p[2]/text()
+//*[@id="climateTable"]/div[3]/div[1]/p[3]/text()
+...
+```
+
+
+From this I inferred how the indexes work for different elements of the table. Then I created a special function for generating xpaths of these elements. I also had to perform some data cleaning which I extracted to a special function as well. 
+
+```{r}
+document_climate <- read_html("https://www.timeanddate.com/weather/germany/frankfurt/climate")
+```
+
+
+```{r}
+# Cleans retrieved text of spaces and measuring units
+clean <- function(s, n){
+  substr(s, 2, nchar(s)-n) %>% as.numeric()
+}
+
+# Returns the xpath of the element
+get_xpath <- function(month, temp){
+  toggle = 1
+  
+  if(is.na(temp)){ # precipitation path is requested
+    temp = 1 
+    toggle = 2 
+  }
+  
+  paste('//*[@id="climateTable"]/div[', month, ']/div[', toggle,']/p[', temp, ']/text()', sep='')
+}
+
+# Fetches the element from the html 
+fetch_element <- function(month, temp){
+  document_climate %>% 
+    html_elements(xpath=get_xpath(month, temp)) %>% 
+    html_text()
+}
+```
+
+
+```{r}
+month <- c("January", "February", "March", "April", "May", 
+           "June", "July", "August", "September", "October", 
+           "November", "December")
+highest <- c()
+lowest <- c()
+mean <- c()
+precipitation <- c()
+
+for (m in c(2:13)){
+  highest <- c(highest, fetch_element(m, 1) %>% clean(3))
+  lowest <- c(lowest,  fetch_element(m, 2) %>% clean(3))
+  mean <- c(mean, fetch_element(m, 3) %>% clean(3))
+  precipitation <- c(precipitation, fetch_element(m , NA) %>% clean(4))
+}
+
+final <- data.frame(month, highest, lowest, mean, precipitation)
+final$month <- factor(final$month, levels=month)
+final %>% kable(format="latex", booktabs = TRUE) %>% 
+  kable_styling(latex_options = c("striped", "HOLD_position"))
+```
+
+### Visualization
+
+I plotted the temperatures together with red line representing the highest, blue the lowest, and black the mean temperatures. The precipitation I plotted using bars like they usually do in meteorology.
+
+
+```{r, out.width="75%", fig.align = 'center'}
+final %>% ggplot() + 
+  geom_point(aes(x=month, y=highest), color='red') + 
+  geom_point(aes(x=month, y=mean)) + 
+  geom_point(aes(x=month, y=lowest), color='blue') +
+  xlab("Month") + ylab("Temperature [Celsius]") 
+```
+```{r, out.width="75%", fig.align = 'center'}
+final %>% ggplot() + 
+  geom_col(aes(x=month, y=precipitation)) +
+  xlab("Month") + ylab("Precipitation [mm]") 
+```
+

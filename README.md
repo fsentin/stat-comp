@@ -8,3 +8,5 @@ Technische Universität Wien
 - Case Study 2: Data manipulation with tidyverse ([src](cs2.Rmd), [report](cs2.pdf))
 - Case Study 3: Data visualization in R ([src](cs3.Rmd), [report](cs3.html))
 - Case Study 4: Dashboard apps with Shiny ([src](cs4.Rmd), [report](cs4.pdf))
+- Case Study 5: Web Scraping in R  ([src](cs5.Rmd), [report](cs5.pdf))
+- Case Study 6: Survey Development and Analysis ([src](cs6.Rmd), [report](cs6.pdf))

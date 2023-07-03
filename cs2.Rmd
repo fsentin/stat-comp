@@ -1,0 +1,260 @@
+---
+title: "Case Study 2"
+subtitle: "AKSTA Statistical Computing"
+author: "Fani Sentinella-Jerbić"
+date: "04.04.2023"
+output: 
+  pdf_document:
+    latex_engine: xelatex
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+### 1.
+
+Obtaining country information:
+
+```{r}
+library(dplyr)
+countries <- read.csv("country-codes_csv.csv") %>%
+  select(official_name_en, 
+         ISO3166.1.Alpha.3, 
+         ISO3166.1.Alpha.2, 
+         Developed...Developing.Countries, 
+         Region.Name, 
+         Sub.region.Name)
+head(countries)
+```
+
+### 2.
+
+Loading the csv file:
+
+```{r}
+yur <- read.csv("rawdata_373.csv") %>% 
+        rename(country=country_name)
+
+head(yur)
+```
+Loading the txt file:
+
+```{r}
+age <- read.fwf(
+  file="rawdata_343.txt",
+  skip=2,
+  widths=c(8, 66, 4))
+
+age <- age %>% 
+  select(V2, V3) %>% 
+  rename(country=V2, median_age=V3)
+
+head(age)
+```
+From both files I removed the trailing spaces which would otherwise cause problems in merging. 
+
+```{r}
+trim <- function(x) sub("\\s+$", "", x)
+yur$country <- trim(yur$country)
+age$country <- trim(age$country)
+```
+
+
+### 3.
+
+Joining the datasets with full join on key country to keep all observations:
+
+```{r}
+joined <- full_join(yur, age, by = "country")
+head(joined)
+```
+
+### 4.
+
+For the sake of inspecting the problem of using country names as the key, I'm performing a full join:
+
+```{r}
+df_vars <- joined %>% full_join(countries,by=c('country'='official_name_en'))
+df_vars %>% 
+  arrange(country)%>% 
+  select(country) %>%
+  head(20)
+```
+We can see some countries didn't get matched. For example one dataframe contained "Bahamas" and the other contained "Bahamas, the". They should be considered one observation but can't be based on these country names. This is why country codes should be used.
+
+```{r}
+library("readxl")
+match <- read_excel("CIA_factbook_matching_table_iso.xlsx")
+head(match)
+```
+```{r}
+df_vars <- joined %>% 
+  left_join(match,by=c('country'='Country'))
+
+df_vars <- df_vars %>% 
+    left_join(countries, by=c('ISO 3166 3'='ISO3166.1.Alpha.3')) %>%
+    select(!c('ISO 3166 3', 'ISO 3166 2', 'ISO3166.1.Alpha.2'))
+
+head(df_vars)
+```
+
+
+
+### 5.
+
+
+Most special cases are countries which couldn't be matched even with the provided codes.
+
+```{r}
+df_vars[is.na(df_vars$official_name_en), ] %>% 
+  arrange(country) %>% 
+  select(country)
+```
+I split these in 3 categories:
+
+1. Don't have a valid country code in the provided file:
+  - Isle of Man
+  - Guernsey
+  - Jersey
+  - Saint Barthelemy
+  
+2. Don't have an entry in the provided file:  
+  - Curacao
+  - Eswatini
+  - Kosovo
+  - Montenegro
+  - Serbia
+  - Saint Helena, Ascension, and Tristan da Cunha
+  - Saint Martin
+  - Sint Maarten
+  - South Sudan
+
+3. Have wrong country names:
+  - Cabo Verde
+  - Czechia
+  - Timor-Leste
+
+Another special case is Taiwan which does achieve a match but has empty strings instead of useful data:
+```{r}
+df_vars %>% 
+  filter(country=="Taiwan")
+```
+
+From these, the third category can be easily fixed, whereas other would require finding data from other sources or something similar. Because of this, I think it would be better to drop them. Especially in the controversial case of Kosovo, Serbia and Montenegro. For Taiwan, I am replacing empty strings with NA to mark it as missing values.
+
+Fixing the special cases:
+
+```{r}
+joined["country"][joined["country"] == "Czechia"] <- "Czech Republic"
+joined["country"][joined["country"] == "Cabo Verde"] <- "Cape Verde"
+joined["country"][joined["country"] == "Timor-Leste"] <- "East Timor"
+```
+
+```{r}
+df_vars <- joined %>% 
+    left_join(match,by=c('country'='Country')) %>%
+    left_join(countries, by=c('ISO 3166 3'='ISO3166.1.Alpha.3')) %>%
+    select(!c('ISO3166.1.Alpha.2','official_name_en')) %>%
+    filter(!(country %in% c('Curacao','Eswatini','Kosovo','Montenegro','Serbia',
+                      'Saint Helena, Ascension, and Tristan da Cunha', 
+                      'Saint Martin','Sint Maarten','South Sudan',
+                      'Isle of Man', 'Guernsey', 'Jersey', 'Saint Barthelemy'))) %>%
+    na_if('')
+```
+
+
+```{r}
+df_vars[!complete.cases(df_vars), ] %>% 
+  arrange(country) %>% 
+  head()
+```
+
+Now the only missing values left (other than Taiwan) are in youth_unempl_rate, which we can leave and address accordingly later if needed.
+
+Lastly, for the sake of simplicity I'm changing the variable names to something simpler:
+
+```{r}
+df_vars <- df_vars %>% 
+  rename(dev=Developed...Developing.Countries, 
+         region=Region.Name, 
+         subregion=Sub.region.Name)
+```
+
+\newpage 
+
+### 6.
+
+
+```{r}
+df_vars %>% count(dev)
+```
+
+### 7.
+
+```{r}
+df_vars %>% 
+  count(region)
+```
+### 8.
+
+```{r}
+df_vars %>% 
+  group_by(region) %>%
+  count(dev)
+```
+
+\newpage
+
+### 9.
+
+```{r}
+df_vars %>% 
+  filter(!(country=='Taiwan')) %>%
+  group_by(dev) %>%
+  summarise(avgMedAge=mean(median_age), 
+            stdMedAge=sd(median_age), 
+            avgYUR=mean(youth_unempl_rate, na.rm=TRUE), 
+            stdYUR=sd(youth_unempl_rate, na.rm=TRUE))
+```
+The output is expected. In developed countries the average median age is larger, and it's standard deviation is lower. I would guess large differences in wealth in developing countries could be the cause for the large standard deviation. The youth unemployment rate is also larger in developed countries, however I would guess in developing countries most of labour is done "under the table", untracked and thus resulting in such stats.
+
+### 10.
+
+```{r}
+df_vars %>% 
+  filter(!(country=='Taiwan')) %>%
+  group_by(region, dev) %>%
+  summarise(avgMedAge=mean(median_age), 
+            stdMedAge=sd(median_age), 
+            avgYUR=mean(youth_unempl_rate, na.rm=TRUE), 
+            stdYUR=sd(youth_unempl_rate, na.rm=TRUE))
+```
+
+
+### 11.
+
+I create temporary columns for means of groups and then create the new columns based on these.
+
+```{r}
+df_vars <- df_vars  %>% 
+  group_by(region)%>%  
+  
+  mutate(avg_median_age=mean(median_age), 
+         avg_yu=mean(youth_unempl_rate, na.rm=TRUE)) %>%
+  
+  mutate(above_average_median_age=ifelse(median_age > avg_median_age, "yes", "no"),
+         above_average_yu =ifelse(youth_unempl_rate > avg_yu, "yes", "no")) %>%
+  
+  ungroup() %>%
+  select(-c(avg_median_age, 
+            avg_yu))
+
+head(df_vars)
+```
+
+### 12.
+
+```{r}
+write.table(df_vars, "final_dataset.csv", sep=';', na='.', row.names=FALSE)
+```
+
